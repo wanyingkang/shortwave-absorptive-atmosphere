@@ -1,0 +1,57 @@
+#!/bin/bash -f
+#PBS -A _ACCOUNT_
+#PBS -N _CASENAME_
+#PBS -q regular
+#PBS -l select=_NNODES_:ncpus=_NCPUS_:mpiprocs=_NCPUS_:ompthreads=1
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -S /bin/csh -V
+#PBS -M kangwanying1992@gmail.com
+#PBS -m abe
+#############
+# environment:
+export TMPDIR=/glade/scratch/$USER/temp
+mkdir -p $TMPDIR
+source ${GFDL_BASE}/src/extra/env/${GFDL_ENV}
+
+# passing info
+echo Running on host `hostname`
+echo Time is `date`
+echo Directory is `pwd`
+
+export casename=_CASENAME_
+export ncores=_NCPUS_
+export todo=_TODO_
+export eachrun=_EACHRUN_
+export currentrun=_CURRENTRUN_
+export totalrun=_TOTALRUN_
+
+# running model
+SEQUENCE=`echo ${PBS_JOBID} | awk -F. '{print $1}'`
+linnum=`grep -n 'for i in ' run_isca.py | awk -F: '{print $1}'`
+runend=$((currentrun+1))
+runstart=$((currentrun+1-eachrun))
+sed -i "${linnum}c \\\tfor i in range(${runstart},${runend}):" run_isca.py >> ${PBS_JOBNAME}.o${SEQUENCE} 
+python run_isca.py $casename $ncores $todo
+runstatus=$?
+
+# submit new one
+if [ $runstatus -eq 0 ]
+then
+	if [ ${currentrun} -lt ${totalrun} ]
+	then
+		SEQUENCE=`echo ${PBS_JOBID} | awk -F. '{print $1}'`
+		currentrun=$((currentrun+eachrun))
+		currentrun=$((${currentrun}<${totalrun}?${currentrun}:${totalrun}))
+		runend=$((currentrun+1))
+		runstart=$((currentrun+1-eachrun))
+		sed -i "${linnum}c \\\tfor i in range(${runstart},${runend}):" run_isca.py >> ${PBS_JOBNAME}.o${SEQUENCE} 
+		linnum_currentrun=`grep -n -m1 'export currentrun=' run.sub | awk -F: '{print $1}'`
+		sed -i "${linnum_currentrun}c export currentrun=${currentrun}" run.sub
+		qsub run.sub
+	else
+		exit $runstatus
+	fi
+else
+	exit $runstatus
+fi
